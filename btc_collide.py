@@ -3,6 +3,7 @@ import time
 import json
 import random
 import threading
+import argparse
 from bitcoin import *
 import requests
 
@@ -96,4 +97,8 @@ def start_threads(thread_count=4):
 
 
 if __name__ == "__main__":
-    start_threads(thread_count=4)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--thread", type=int, default=4, help="Number of threads to start")
+    args = parser.parse_args()
+
+    start_threads(thread_count=args.thread)
