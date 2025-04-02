@@ -1,6 +1,6 @@
 {
-    "apis": [
-      "https://blockstream.info/api/address/{address}",
-      "https://blockchain.info/rawaddr/{address}?limit=0"
-    ]
-  }
+  "apis": [
+    "https://blockstream.info/api/address/{address}",
+    "https://blockchain.info/rawaddr/{address}?limit=0"
+  ]
+}

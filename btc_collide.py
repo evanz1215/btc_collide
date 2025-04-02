@@ -12,11 +12,19 @@ checked = 0
 found = 0
 lock = threading.Lock()
 
+# 新增：冷卻時間追蹤
+cooldowns = {}
+cooldown_time = 60  # 秒，API 出錯後暫停多久再使用
+
 # 載入 config.json
 with open("config.json", "r") as f:
     config = json.load(f)
 
 api_endpoints = config.get("apis", [])
+
+if not api_endpoints:
+    print("❌ config.json 中未設定 'apis'，請提供至少一個 API。")
+    exit(1)
 
 
 def generate_private_key():
@@ -24,27 +32,52 @@ def generate_private_key():
 
 
 def check_balance_multi_rpc(address):
-    for api in api_endpoints:
-        url = api.replace("{address}", address)
-        try:
-            res = requests.get(url, timeout=10)
-            if res.status_code != 200:
-                continue
-            data = res.json()
+    max_retries = 3
+    global cooldowns
 
-            # 根據 API 來源解析
-            if "chainstats" in data:
-                balance = data["chainstats"]["funded_txo_sum"] - data["chainstats"]["spent_txo_sum"]
-                return balance / 1e8
-            elif "final_balance" in data:
-                return data["final_balance"] / 1e8
-            elif "tx_count" in data and "address" in data:
-                return float(data.get("balance", 0)) / 1e8
-            else:
-                continue
-        except:
+    current_time = time.time()
+
+    for api in api_endpoints:
+        # 檢查是否正在冷卻
+        if cooldowns.get(api, 0) > current_time:
+            print(f"[COOLDOWN] Skipping {api} (cooling down)")
             continue
-    return 0.0
+
+        url = api.replace("{address}", address)
+
+        for attempt in range(max_retries):
+            try:
+                res = requests.get(url, timeout=10)
+                if res.status_code != 200:
+                    raise Exception(f"HTTP {res.status_code}")
+
+                data = res.json()
+
+                # 根據 API 回傳格式解析
+                if "chainstats" in data:
+                    balance = (
+                        data["chainstats"]["funded_txo_sum"] - data["chainstats"]["spent_txo_sum"]
+                    )
+                    return balance / 1e8
+                elif "final_balance" in data:
+                    return data["final_balance"] / 1e8
+                elif "tx_count" in data and "address" in data:
+                    return float(data.get("balance", 0)) / 1e8
+                else:
+                    raise Exception("Unexpected response structure")
+
+            except Exception as e:
+                wait_time = 2**attempt
+                print(
+                    f"[RETRY] API: {url} failed (Attempt {attempt + 1}), retrying in {wait_time}s... ({e})"
+                )
+                time.sleep(wait_time)
+                continue  # 下一次 retry
+
+        # 全部 retry 失敗，進入冷卻期
+        cooldowns[api] = time.time() + cooldown_time
+
+    return 0.0  # 所有 API 都失敗或超時
 
 
 def save_key_info(private_key, public_key, address, balance):
@@ -92,8 +125,12 @@ def start_threads(thread_count=4):
         t = threading.Thread(target=worker, daemon=True)
         t.start()
 
-    while True:
-        time.sleep(10)
+    try:
+        while True:
+            time.sleep(10)
+    except KeyboardInterrupt:
+        print("\n[EXIT] Gracefully stopped.")
+        print(f"Total Checked: {checked}, Found: {found}")
 
 
 if __name__ == "__main__":
